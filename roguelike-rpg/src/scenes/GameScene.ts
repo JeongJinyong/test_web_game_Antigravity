@@ -1,6 +1,8 @@
 import Phaser from 'phaser';
 import Player from '../entities/Player';
 import DungeonGenerator, { DungeonResult, TileType } from '../systems/DungeonGenerator';
+import CombatSystem from '../systems/CombatSystem';
+import { Enemy, Slime, Skeleton, Demon } from '../entities/Enemy';
 
 export default class GameScene extends Phaser.Scene {
     private player!: Player;
@@ -9,19 +11,30 @@ export default class GameScene extends Phaser.Scene {
     private groundLayer!: Phaser.Tilemaps.TilemapLayer;
 
     private dungeon!: DungeonResult;
+    private combatSystem!: CombatSystem;
+    private enemies!: Phaser.Physics.Arcade.Group;
 
     constructor() {
         super('GameScene');
     }
 
     create() {
+        this.scene.launch('UIScene');
+
         this.generateDungeon();
+        this.setupEnemies();
+        this.spawnPlayer();
+        this.setupCombat();
+        this.setupCamera();
         this.setupInput();
     }
 
     update() {
         if (this.player) {
             this.player.update();
+        }
+        if (this.combatSystem) {
+            this.combatSystem.update();
         }
     }
 
@@ -40,34 +53,10 @@ export default class GameScene extends Phaser.Scene {
         this.tileset = this.map.addTilesetImage('roguelike-sheet', 'roguelike-sheet', 16, 16, 0, 1)!;
 
         // Create layers
-        // We can put walls and floors on the same layer for simplicity, or separate them.
-        // Let's use one layer for now, but we need to set collisions properly.
         this.groundLayer = this.map.createLayer(0, this.tileset, 0, 0)!;
 
-        // Set collision for walls (index 10 is wall, 5 is floor in our mapping below)
-        // Actually we need to check what indices we map to.
-        // Let's say Wall = 570 (generic wall), Floor = 0 (generic floor) from the pack?
-        // Kenney Roguelike pack indices are tricky without visual.
-        // Let's assume:
-        // Wall: Index 10 (from previous assumption, let's stick to it or refine)
-        // Floor: Index 5
-        // Empty: -1 (or a black tile)
-
-        // Let's refine indices based on standard Kenney Roguelike sheet (often 57x31 tiles)
-        // A safe bet for a wall is often around index 10-20.
-        // A safe bet for floor is often index 0-5.
-        // Let's use:
-        // Wall: 10
-        // Floor: 5
-        // Empty: -1 (or a black tile)
-
+        // Set collision for walls (index 10 is wall)
         this.groundLayer.setCollision(10);
-
-        // Spawn Player
-        this.spawnPlayer();
-
-        // Setup Camera
-        this.setupCamera();
     }
 
     private convertDungeonToMapData(tiles: TileType[][]): number[][] {
@@ -81,10 +70,62 @@ export default class GameScene extends Phaser.Scene {
         }));
     }
 
+    private setupEnemies() {
+        this.enemies = this.physics.add.group({
+            classType: Enemy,
+            runChildUpdate: true
+        });
+
+        // Spawn enemies in rooms (skip start room)
+        const { rooms, startRoom } = this.dungeon;
+
+        rooms.forEach(room => {
+            if (room === startRoom) {
+                // Spawn a few weak enemies in start room for testing as requested
+                this.spawnEnemyInRoom(room, 'slime');
+                this.spawnEnemyInRoom(room, 'slime');
+                this.spawnEnemyInRoom(room, 'skeleton');
+                return;
+            }
+
+            // Randomly spawn 2-5 enemies per room
+            const enemyCount = Phaser.Math.Between(2, 5);
+            for (let i = 0; i < enemyCount; i++) {
+                const typeRoll = Math.random();
+                let type = 'slime';
+                if (typeRoll > 0.7) type = 'demon';
+                else if (typeRoll > 0.4) type = 'skeleton';
+
+                this.spawnEnemyInRoom(room, type);
+            }
+        });
+
+        this.physics.add.collider(this.enemies, this.groundLayer);
+    }
+
+    private spawnEnemyInRoom(room: any, type: string) {
+        const x = Phaser.Math.Between(room.x + 1, room.x + room.width - 2) * 16 + 8;
+        const y = Phaser.Math.Between(room.y + 1, room.y + room.height - 2) * 16 + 8;
+
+        let enemy: Enemy;
+        switch (type) {
+            case 'demon':
+                enemy = new Demon(this, x, y);
+                break;
+            case 'skeleton':
+                enemy = new Skeleton(this, x, y);
+                break;
+            case 'slime':
+            default:
+                enemy = new Slime(this, x, y);
+                break;
+        }
+
+        this.enemies.add(enemy);
+    }
+
     private spawnPlayer() {
         const { startRoom } = this.dungeon;
-        // Convert grid coordinates to world coordinates
-        // Center of the tile
         const x = startRoom.centerX * 16 + 8;
         const y = startRoom.centerY * 16 + 8;
 
@@ -94,6 +135,10 @@ export default class GameScene extends Phaser.Scene {
             this.player = new Player(this, x, y);
             this.physics.add.collider(this.player, this.groundLayer);
         }
+    }
+
+    private setupCombat() {
+        this.combatSystem = new CombatSystem(this, this.player, this.enemies);
     }
 
     private setupCamera() {
