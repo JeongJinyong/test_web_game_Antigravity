@@ -1,7 +1,6 @@
 import Phaser from 'phaser';
 import Player from '../entities/Player';
 import { Enemy } from '../entities/Enemy';
-import { ICombatStats } from '../types';
 
 export default class CombatSystem {
     private scene: Phaser.Scene;
@@ -90,6 +89,8 @@ export default class CombatSystem {
         }
     }
 
+    public onEnemyKilled?: (enemy: Enemy) => void;
+
     private killEnemy(enemy: Enemy) {
         enemy.disableBody(true, true); // Hide and disable physics
         // Clean up HP bar
@@ -98,7 +99,10 @@ export default class CombatSystem {
             this.hpBars.delete(enemy);
         }
 
-        // Drop loot logic hook here
+        if (this.onEnemyKilled) {
+            this.onEnemyKilled(enemy);
+        }
+
         console.log('Enemy died!');
     }
 
